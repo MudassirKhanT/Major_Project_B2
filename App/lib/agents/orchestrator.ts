@@ -4,33 +4,42 @@ import { buildAgentTool, getDefaultSystemPrompt } from "./runner";
 import { getAgentById } from "@/lib/db/queries/agents";
 import { OrchestrationTask, OrchestrationResult } from "./types";
 
+const MODEL_UPGRADE: Record<string, string> = {
+  "gemini-2.0-flash":          GEMINI_MODELS.FLASH,
+  "gemini-2.0-flash-001":      GEMINI_MODELS.FLASH,
+  "gemini-2.0-flash-lite":     GEMINI_MODELS.FLASH,
+  "gemini-1.5-flash":          GEMINI_MODELS.FLASH,
+  "gemini-1.5-pro":            GEMINI_MODELS.FLASH,
+  "gemini-2.5-pro":            GEMINI_MODELS.FLASH,
+};
+const upgradeModel = (m: string) => MODEL_UPGRADE[m] ?? m;
+
 export async function runOrchestration(task: OrchestrationTask): Promise<OrchestrationResult> {
   const { task: userTask, agentIds, userId, mode } = task;
 
-  // Load all agents
   const agents = await Promise.all(agentIds.map((id) => getAgentById(id)));
   const validAgents = agents.filter(Boolean) as NonNullable<(typeof agents)[0]>[];
 
   if (!validAgents.length) throw new Error("No valid agents found");
 
-  // ── Parallel mode: run all agents simultaneously, then synthesize ──────────
+  // ── Parallel mode ──────────────────────────────────────────────────────────
   if (mode === "parallel") {
     const results = await Promise.all(
       validAgents.map(async (agent) => {
         try {
           const systemPrompt = getDefaultSystemPrompt(agent.type, agent.systemPrompt);
           const { text, usage } = await generateText({
-            model: google(agent.model ?? GEMINI_MODELS.FLASH),
+            model: google(upgradeModel(agent.model ?? GEMINI_MODELS.FLASH)),
             system: systemPrompt,
             messages: [{ role: "user", content: userTask }],
             temperature: agent.temperature ?? 0.7,
-            maxTokens: 1024,
+            maxOutputTokens: 4096,
           });
           return {
             agentId: agent.id,
             agentName: agent.name,
             result: text,
-            tokensUsed: (usage?.promptTokens ?? 0) + (usage?.completionTokens ?? 0),
+            tokensUsed: (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0),
           };
         } catch (err) {
           return {
@@ -43,10 +52,7 @@ export async function runOrchestration(task: OrchestrationTask): Promise<Orchest
       })
     );
 
-    // Synthesize all results
-    const synthesis = results
-      .map((r) => `### ${r.agentName}\n${r.result}`)
-      .join("\n\n---\n\n");
+    const synthesis = results.map((r) => `### ${r.agentName}\n${r.result}`).join("\n\n---\n\n");
 
     const { text: finalAnswer, usage: synthUsage } = await generateText({
       model: google(GEMINI_MODELS.FLASH),
@@ -57,17 +63,17 @@ export async function runOrchestration(task: OrchestrationTask): Promise<Orchest
           content: `Original task: ${userTask}\n\nAgent responses:\n${synthesis}\n\nProvide a final synthesized answer.`,
         },
       ],
-      maxTokens: 1500,
+      maxOutputTokens: 1500,
     });
 
     return {
       finalAnswer,
       agentResults: results,
-      totalTokens: results.reduce((s, r) => s + r.tokensUsed, 0) + ((synthUsage?.promptTokens ?? 0) + (synthUsage?.completionTokens ?? 0)),
+      totalTokens: results.reduce((s, r) => s + r.tokensUsed, 0) + ((synthUsage?.inputTokens ?? 0) + (synthUsage?.outputTokens ?? 0)),
     };
   }
 
-  // ── Sequential / Auto mode: orchestrator delegates via tool calls ──────────
+  // ── Sequential / Auto mode ─────────────────────────────────────────────────
   const agentTools: Record<string, ReturnType<typeof buildAgentTool>> = {};
   for (const agent of validAgents) {
     const systemPrompt = getDefaultSystemPrompt(agent.type, agent.systemPrompt);
@@ -77,13 +83,11 @@ export async function runOrchestration(task: OrchestrationTask): Promise<Orchest
       agent.name,
       agent.description,
       systemPrompt,
-      agent.model ?? GEMINI_MODELS.FLASH
+      upgradeModel(agent.model ?? GEMINI_MODELS.FLASH)
     );
   }
 
-  const agentList = validAgents
-    .map((a) => `- ${a.name} (${a.type}): ${a.description}`)
-    .join("\n");
+  const agentList = validAgents.map((a) => `- ${a.name} (${a.type}): ${a.description}`).join("\n");
 
   const { text: finalAnswer, usage } = await generateText({
     model: google(GEMINI_MODELS.FLASH),
@@ -99,11 +103,10 @@ Strategy:
 3. Combine their responses into a comprehensive final answer`,
     messages: [{ role: "user", content: userTask }],
     tools: agentTools,
-    maxSteps: validAgents.length + 2,
-    maxTokens: 2000,
+    maxOutputTokens: 2000,
   });
 
-  const totalTokens = (usage?.promptTokens ?? 0) + (usage?.completionTokens ?? 0);
+  const totalTokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
 
   return {
     finalAnswer,

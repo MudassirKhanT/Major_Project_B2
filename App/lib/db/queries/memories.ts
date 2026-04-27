@@ -37,13 +37,13 @@ export async function extractAndSaveMemories(
 
   try {
     const { text } = await generateText({
-      model: google(GEMINI_MODELS.FLASH_LITE),
+      model: google(GEMINI_MODELS.FLASH),
       system: `Extract 1-3 important facts worth remembering from this conversation.
 Return JSON array: [{"content": "fact here", "importance": 7}]
 Importance 1-10 (10 = most important). Only facts, preferences, or context useful for future conversations.
 If nothing worth remembering, return [].`,
       messages: [{ role: "user", content: `Conversation:\n${conversationText.slice(0, 3000)}` }],
-      maxTokens: 300,
+      maxOutputTokens: 300,
     });
 
     const jsonMatch = text.match(/\[[\s\S]*\]/);
@@ -60,9 +60,17 @@ If nothing worth remembering, return [].`,
   }
 }
 
-// Format memories for injection into system prompt
+// Format memories for injection into system prompt (capped at ~2000 chars)
 export function formatMemoriesForPrompt(mems: Array<{ content: string }>): string {
   if (!mems.length) return "";
-  const list = mems.map((m) => `- ${m.content}`).join("\n");
-  return `\n\n## What I Remember About You\n${list}\n`;
+  const MAX_CHARS = 2000;
+  let total = 0;
+  const lines: string[] = [];
+  for (const m of mems) {
+    if (total + m.content.length > MAX_CHARS) break;
+    lines.push(`- ${m.content}`);
+    total += m.content.length;
+  }
+  if (!lines.length) return "";
+  return `\n\n## What I Remember About You\n${lines.join("\n")}\n`;
 }

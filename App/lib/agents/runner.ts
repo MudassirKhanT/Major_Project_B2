@@ -14,19 +14,27 @@ const AGENT_TYPE_PROMPTS: Record<string, string> = {
   code: CODE_AGENT_SYSTEM_PROMPT,
 };
 
-const TYPE_DEFAULTS: Record<string, { temperature: number; maxTokens: number }> = {
-  email:    { temperature: 0.7, maxTokens: 2048 },
-  research: { temperature: 0.3, maxTokens: 4096 },
-  stock:    { temperature: 0.2, maxTokens: 3000 },
-  code:     { temperature: 0.1, maxTokens: 8192 },
-  custom:   { temperature: 0.7, maxTokens: 2048 },
+const TYPE_MODEL: Record<string, string> = {
+  email:    GEMINI_MODELS.FLASH,
+  research: GEMINI_MODELS.PRO,
+  stock:    GEMINI_MODELS.FLASH,
+  code:     GEMINI_MODELS.PRO,
+  custom:   GEMINI_MODELS.FLASH,
 };
 
-function resolveDefaults(agentType: string | undefined, temperature: number, maxTokens: number) {
+const TYPE_DEFAULTS: Record<string, { temperature: number; maxOutputTokens: number }> = {
+  email:    { temperature: 0.7, maxOutputTokens: 4096  },
+  research: { temperature: 0.3, maxOutputTokens: 16384 },
+  stock:    { temperature: 0.2, maxOutputTokens: 8192  },
+  code:     { temperature: 0.1, maxOutputTokens: 32768 },
+  custom:   { temperature: 0.7, maxOutputTokens: 4096  },
+};
+
+function resolveDefaults(agentType: string | undefined, temperature: number, maxOutputTokens: number) {
   const typeDefaults = TYPE_DEFAULTS[agentType ?? "custom"] ?? TYPE_DEFAULTS.custom;
   return {
     temperature: temperature === 0.7 && typeDefaults.temperature !== 0.7 ? typeDefaults.temperature : temperature,
-    maxTokens: maxTokens === 2048 && typeDefaults.maxTokens !== 2048 ? typeDefaults.maxTokens : maxTokens,
+    maxOutputTokens: maxOutputTokens === 2048 && typeDefaults.maxOutputTokens !== 2048 ? typeDefaults.maxOutputTokens : maxOutputTokens,
   };
 }
 
@@ -35,7 +43,7 @@ function resolveDefaults(agentType: string | undefined, temperature: number, max
 const sendEmailTool = tool({
   description:
     "Send an actual email. Only use this when the user explicitly asks to SEND (not just draft) an email.",
-  parameters: z.object({
+  inputSchema: z.object({
     to: z.string().describe("Recipient email address"),
     subject: z.string().describe("Email subject line"),
     body: z.string().describe("Full plain-text email body"),
@@ -62,33 +70,38 @@ const sendEmailTool = tool({
 });
 
 const searchWebTool = tool({
-  description: "Search for current information on a topic to help answer research questions.",
-  parameters: z.object({
+  description: "Search the web for current information on a topic.",
+  inputSchema: z.object({
     query: z.string().describe("Search query"),
   }),
   execute: async ({ query }) => {
-    // Stub — swap in Brave/Serper/Tavily API key here for live search
-    return {
-      results: `Showing placeholder results for: "${query}". Add SEARCH_API_KEY to enable live web search.`,
-    };
+    const key = process.env.SEARCH_API_KEY;
+    if (!key) {
+      return {
+        status: "unavailable",
+        message: `Live web search is not configured. Answer the question about "${query}" using your training knowledge. Do not attempt further searches.`,
+      };
+    }
+    return { status: "unavailable", message: "Search API not implemented." };
   },
 });
 
-// Build tools map based on agent type
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getTools(agentType: string): Record<string, any> | undefined {
   if (agentType === "email") return { send_email: sendEmailTool };
-  if (agentType === "research") return { search_web: searchWebTool };
+  if (agentType === "research" && process.env.SEARCH_API_KEY) return { search_web: searchWebTool };
   return undefined;
 }
 
 // ── Non-streaming ─────────────────────────────────────────────────────────────
 export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult> {
-  const { messages, systemPrompt, model = GEMINI_MODELS.FLASH } = options;
-  const resolved = resolveDefaults(options.agentType, options.temperature ?? 0.7, options.maxTokens ?? 2048);
-  const { temperature, maxTokens } = resolved;
+  const agentType = options.agentType ?? "custom";
+  const { messages, systemPrompt } = options;
+  const model = options.model ?? TYPE_MODEL[agentType] ?? GEMINI_MODELS.FLASH;
+  const resolved = resolveDefaults(agentType, options.temperature ?? 0.7, options.maxTokens ?? 2048);
+  const { temperature, maxOutputTokens } = resolved;
 
-  const tools = getTools(options.agentType ?? "custom");
+  const tools = getTools(agentType);
 
   const { text, usage } = await generateText({
     model: google(model),
@@ -98,22 +111,24 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       content: m.content,
     })),
     temperature,
-    maxTokens,
-    ...(tools ? { tools, maxSteps: 5 } : {}),
+    maxOutputTokens,
+    ...(tools ? { tools, maxSteps: 3 } : {}),
   });
 
-  const tokensInput = usage?.promptTokens ?? 0;
-  const tokensOutput = usage?.completionTokens ?? 0;
+  const tokensInput = usage?.inputTokens ?? 0;
+  const tokensOutput = usage?.outputTokens ?? 0;
   return { content: text, tokensInput, tokensOutput, totalTokens: tokensInput + tokensOutput, model };
 }
 
 // ── Streaming ─────────────────────────────────────────────────────────────────
 export async function streamAgentResponse(options: AgentRunOptions) {
-  const { messages, systemPrompt, model = GEMINI_MODELS.FLASH } = options;
-  const resolved = resolveDefaults(options.agentType, options.temperature ?? 0.7, options.maxTokens ?? 2048);
-  const { temperature, maxTokens } = resolved;
+  const agentType = options.agentType ?? "custom";
+  const { messages, systemPrompt } = options;
+  const model = options.model ?? TYPE_MODEL[agentType] ?? GEMINI_MODELS.FLASH;
+  const resolved = resolveDefaults(agentType, options.temperature ?? 0.7, options.maxTokens ?? 2048);
+  const { temperature, maxOutputTokens } = resolved;
 
-  const tools = getTools(options.agentType ?? "custom");
+  const tools = getTools(agentType);
 
   const result = streamText({
     model: google(model),
@@ -123,8 +138,8 @@ export async function streamAgentResponse(options: AgentRunOptions) {
       content: m.content,
     })),
     temperature,
-    maxTokens,
-    ...(tools ? { tools, maxSteps: 5 } : {}),
+    maxOutputTokens,
+    ...(tools ? { tools, maxSteps: 3 } : {}),
   });
 
   return result;
@@ -134,7 +149,7 @@ export async function streamAgentResponse(options: AgentRunOptions) {
 export function buildAgentTool(agentId: string, agentName: string, agentDesc: string, systemPrompt: string, model: string) {
   return tool({
     description: `Delegate to ${agentName} — ${agentDesc}`,
-    parameters: z.object({ task: z.string().describe(`Specific task for ${agentName}`) }),
+    inputSchema: z.object({ task: z.string().describe(`Specific task for ${agentName}`) }),
     execute: async ({ task }) => {
       try {
         const { text, usage } = await generateText({
@@ -142,9 +157,9 @@ export function buildAgentTool(agentId: string, agentName: string, agentDesc: st
           system: systemPrompt,
           messages: [{ role: "user", content: task }],
           temperature: 0.7,
-          maxTokens: 1024,
+          maxOutputTokens: 1024,
         });
-        return { agentName, result: text, tokensUsed: (usage?.promptTokens ?? 0) + (usage?.completionTokens ?? 0) };
+        return { agentName, result: text, tokensUsed: (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0) };
       } catch (err) {
         return { agentName, result: "", error: err instanceof Error ? err.message : "Agent error" };
       }

@@ -113,6 +113,7 @@ export const agentRelations = relations(agents, ({ many }) => ({
   conversations: many(conversations),
   messages: many(messages),
   usageLogs: many(usageLogs),
+  memories: many(memories),
 }));
 
 export const conversationRelations = relations(
