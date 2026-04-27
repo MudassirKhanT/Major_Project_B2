@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/agents", icon: "🤖", label: "My Agents" },
   { href: "/dashboard/agents/new", icon: "✦", label: "Create Agent" },
   { href: "/dashboard/conversations", icon: "💬", label: "Conversations" },
+  { href: "/dashboard/converter", icon: "🔄", label: "File Converter" },
   { href: "/dashboard/usage", icon: "📊", label: "Usage & Stats" },
 ];
 

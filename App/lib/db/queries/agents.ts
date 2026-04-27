@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { agents, NewAgent } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 
 export async function createAgent(data: NewAgent) {
   const [agent] = await db.insert(agents).values(data).returning();
@@ -48,13 +48,11 @@ export async function deleteAgent(id: string) {
 }
 
 export async function incrementAgentRuns(id: string, tokensUsed: number) {
-  const agent = await getAgentById(id);
-  if (!agent) throw new Error("Agent not found");
   await db
     .update(agents)
     .set({
-      totalRuns: (agent.totalRuns ?? 0) + 1,
-      totalTokensUsed: (agent.totalTokensUsed ?? 0) + tokensUsed,
+      totalRuns: sql`COALESCE(${agents.totalRuns}, 0) + 1`,
+      totalTokensUsed: sql`COALESCE(${agents.totalTokensUsed}, 0) + ${tokensUsed}`,
       updatedAt: new Date(),
     })
     .where(eq(agents.id, id));

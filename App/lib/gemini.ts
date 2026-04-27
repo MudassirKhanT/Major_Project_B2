@@ -5,18 +5,22 @@ export const google = createGoogleGenerativeAI({
 });
 
 export const GEMINI_MODELS = {
-  FLASH: "gemini-2.0-flash",
-  FLASH_LITE: "gemini-2.0-flash-lite",
-  PRO: "gemini-1.5-pro",
+  // Free tier: 10 RPM, 20 RPD for 2.5-flash — the only working free model on this key
+  FLASH:      "gemini-2.5-flash",
+  FLASH_LITE: "gemini-2.5-flash",   // same model — no separate lite on this key
+  PRO:        "gemini-2.5-flash",   // same model — 2.5-pro has ~5 RPD free
 } as const;
 
 export type GeminiModel = (typeof GEMINI_MODELS)[keyof typeof GEMINI_MODELS];
 
-// Cost estimate in USD per 1M tokens (approximate)
+// Cost estimate in USD per 1M tokens (free tier = $0 within daily limits)
 const TOKEN_COST: Record<string, { input: number; output: number }> = {
-  "gemini-2.0-flash": { input: 0.1, output: 0.4 },
-  "gemini-2.0-flash-lite": { input: 0.075, output: 0.3 },
-  "gemini-1.5-pro": { input: 3.5, output: 10.5 },
+  "gemini-2.0-flash":      { input: 0.10,  output: 0.40 },
+  "gemini-2.0-flash-001":  { input: 0.10,  output: 0.40 },
+  "gemini-2.0-flash-lite": { input: 0.075, output: 0.30 },
+  // 2.5 models kept for reference but 20 req/day free limit — avoid by default
+  "gemini-2.5-flash":      { input: 0.15,  output: 0.60 },
+  "gemini-2.5-pro":        { input: 1.25,  output: 10.0 },
 };
 
 export function estimateCost(

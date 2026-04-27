@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { conversations, NewConversation } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 
 export async function createConversation(data: NewConversation) {
   const [conv] = await db.insert(conversations).values(data).returning();
@@ -32,13 +32,11 @@ export async function listConversationsByAgent(agentId: string) {
 }
 
 export async function incrementConversationStats(id: string, tokens: number, messageCount = 1) {
-  const conv = await getConversationById(id);
-  if (!conv) throw new Error("Conversation not found");
   await db
     .update(conversations)
     .set({
-      totalMessages: (conv.totalMessages ?? 0) + messageCount,
-      totalTokens: (conv.totalTokens ?? 0) + tokens,
+      totalMessages: sql`COALESCE(${conversations.totalMessages}, 0) + ${messageCount}`,
+      totalTokens: sql`COALESCE(${conversations.totalTokens}, 0) + ${tokens}`,
       updatedAt: new Date(),
     })
     .where(eq(conversations.id, id));

@@ -82,36 +82,31 @@ export default function AgentChat({ agentId }: { agentId: string }) {
       let fullText = "";
       let buffer = "";
 
+      const processLine = (line: string) => {
+        if (!line.startsWith("data: ")) return;
+        let data: Record<string, unknown>;
+        try { data = JSON.parse(line.slice(6)); } catch { return; }
+        if (data.error) throw new Error(data.error as string);
+        if (data.text) {
+          fullText += data.text as string;
+          setMessages((prev) => { const u = [...prev]; u[u.length - 1] = { role: "assistant", content: fullText, streaming: true }; return u; });
+        }
+        if (data.done) {
+          if (data.conversationId) setConversationId(data.conversationId as string);
+          if (data.tokensUsed) setTokensUsed((t) => t + (data.tokensUsed as number));
+          setMessages((prev) => { const u = [...prev]; u[u.length - 1] = { role: "assistant", content: fullText, streaming: false }; return u; });
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.text) {
-              fullText += data.text;
-              setMessages((prev) => { const u = [...prev]; u[u.length - 1] = { role: "assistant", content: fullText, streaming: true }; return u; });
-            }
-            if (data.done) {
-              if (data.conversationId) setConversationId(data.conversationId);
-              if (data.tokensUsed) setTokensUsed((t) => t + data.tokensUsed);
-              setMessages((prev) => { const u = [...prev]; u[u.length - 1] = { role: "assistant", content: fullText, streaming: false }; return u; });
-            }
-          } catch { /* skip malformed frames */ }
-        }
+        for (const line of lines) processLine(line);
       }
-      // flush any remaining buffer
-      if (buffer.startsWith("data: ")) {
-        try {
-          const data = JSON.parse(buffer.slice(6));
-          if (data.conversationId) setConversationId(data.conversationId);
-          if (data.tokensUsed) setTokensUsed((t) => t + data.tokensUsed);
-        } catch { /* ignore */ }
-      }
+      if (buffer) processLine(buffer);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "An error occurred";
       toast.error(msg);
@@ -175,6 +170,34 @@ export default function AgentChat({ agentId }: { agentId: string }) {
     toast.success("Copied to clipboard");
   }
 
+  async function downloadLastAsDocx() {
+    const last = [...messages].reverse().find((m) => m.role === "assistant" && !m.streaming);
+    if (!last) return;
+    toast.info("Generating Word document…");
+    try {
+      const res = await fetch("/api/export/docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: last.content, filename: agent?.name ?? "document" }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error); }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(agent?.name ?? "document").replace(/\s+/g, "_")}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Downloaded as Word document!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Export failed");
+    }
+  }
+
+  // Show Word download button when last assistant message is long (likely a document)
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant" && !m.streaming);
+  const showWordExport = !!lastAssistant && lastAssistant.content.length > 300;
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
   }
@@ -234,6 +257,13 @@ export default function AgentChat({ agentId }: { agentId: string }) {
             </button>
           )}
           {messages.length > 0 && <>
+            {showWordExport && (
+              <button onClick={downloadLastAsDocx}
+                className="px-3 py-1.5 text-xs bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-lg border border-blue-500/40 transition-all"
+                title="Download last response as Word document">
+                📄 Word
+              </button>
+            )}
             <button onClick={copyConversation} className="px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg border border-slate-700" title="Copy conversation">📋</button>
             <button onClick={() => { setMessages([]); setConversationId(null); setTokensUsed(0); }} className="px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg border border-slate-700">New Chat</button>
           </>}
