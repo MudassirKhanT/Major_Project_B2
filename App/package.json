@@ -1,0 +1,45 @@
+{
+  "name": "agentify",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:push": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 drizzle-kit push",
+    "db:studio": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 drizzle-kit studio",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^1.2.0",
+    "@arcjet/next": "^1.0.0-alpha.34",
+    "@clerk/nextjs": "^6.11.0",
+    "@google/generative-ai": "^0.21.0",
+    "@neondatabase/serverless": "^0.10.4",
+    "@types/pg": "^8.20.0",
+    "ai": "^4.3.15",
+    "drizzle-orm": "^0.41.0",
+    "next": "14.2.29",
+    "pg": "^8.20.0",
+    "react": "^18",
+    "react-dom": "^18",
+    "reactflow": "^11.11.4",
+    "resend": "^6.12.2",
+    "sonner": "^2.0.7",
+    "uuid": "^11.0.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@types/uuid": "^10.0.0",
+    "autoprefixer": "^10.0.1",
+    "cross-env": "^10.1.0",
+    "drizzle-kit": "^0.30.4",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  }
+}
